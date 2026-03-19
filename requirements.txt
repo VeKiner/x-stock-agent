@@ -1,14 +1,7 @@
-# X-Stock Agent - 核心依赖
-
-# 数据获取（真实A股）
+# X-Stock Agent - 核心依赖（真实数据版）
 akshare>=1.12.0
 pandas>=2.0.0
 numpy>=1.24.0
-
-# Web Dashboard
 streamlit>=1.30.0
 plotly>=5.18.0
-
-# 工具库
-pyyaml>=6.0.1
 requests>=2.31.0
