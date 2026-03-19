@@ -1,0 +1,56 @@
+# X-Stock Agent Configuration
+
+# Data Sources
+data:
+  primary: akshare
+  backup: tushare
+  cache_dir: ./data_cache
+  cache_expire_hours: 24
+
+# Trading Settings
+trading:
+  market: A_share
+  mode: paper  # paper or real
+  initial_capital: 1000000  # 100 万模拟资金
+  
+# Risk Control
+risk:
+  max_position_per_stock: 0.20  # 单只股票最大仓位 20%
+  max_daily_loss: 0.02  # 单日最大亏损 2%
+  max_drawdown_warning: 0.10  # 总回撤警戒线 10%
+  stop_loss_per_stock: 0.08  # 单票止损 8%
+  
+# Strategy Weights
+strategies:
+  momentum:
+    enabled: true
+    weight: 0.3
+  mean_reversion:
+    enabled: true
+    weight: 0.3
+  ml_predict:
+    enabled: true
+    weight: 0.25
+  sentiment:
+    enabled: true
+    weight: 0.15
+
+# Schedule
+schedule:
+  market_data_update: "*/5 * 9-15 * * 1-5"  # 交易日每 5 分钟
+  daily_review: "0 15 * * 1-5"  # 每个交易日 15:00
+  evolution_run: "0 20 * * 1-5"  # 每个交易日 20:00
+  github_scan: "0 2 * * 0"  # 每周日 2:00
+
+# Web Dashboard
+web:
+  host: 0.0.0.0
+  port: 8501
+  enable_cors: true
+
+# Logging
+logging:
+  level: INFO
+  file: ./logs/xstock.log
+  rotation: 100 MB
+  retention: 30 days
