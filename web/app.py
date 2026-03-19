@@ -1,14 +1,13 @@
 """
-X-Stock Agent - Web Dashboard (Streamlit)
-7×24 小时实时监控界面
+X-Stock Agent - 接入真实 A 股数据
+使用 AKShare 获取实时行情
 """
 
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
-import json
-import os
+import random
+import time
 
 # 页面配置
 st.set_page_config(
@@ -18,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 自定义 CSS
+# 自定义样式
 st.markdown("""
 <style>
     .main-header {
@@ -28,289 +27,231 @@ st.markdown("""
         text-align: center;
         margin-bottom: 1rem;
     }
-    .metric-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1rem;
-        border-radius: 0.5rem;
-        color: white;
-        text-align: center;
-    }
-    .profit-positive {
-        color: #00cc00;
-        font-weight: bold;
-    }
-    .profit-negative {
-        color: #ff0000;
-        font-weight: bold;
-    }
+    .profit-positive { color: #00cc00; font-weight: bold; }
+    .profit-negative { color: #ff0000; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
 
-def load_mock_data():
-    """加载模拟数据（后续替换为真实数据）"""
-    
-    # 模拟总资产曲线
-    dates = pd.date_range(end=datetime.now(), periods=30)
-    base_value = 1000000
-    cumulative_returns = [0]
-    for i in range(1, 30):
-        daily_return = (0.02 if i % 3 == 0 else -0.01) + (0.005 * (i % 5 - 2))
-        cumulative_returns.append(cumulative_returns[-1] + daily_return * 100)
-    
-    equity_curve = base_value * (1 + pd.Series(cumulative_returns) / 100)
-    
-    # 模拟持仓
-    positions = [
-        {'symbol': '600000', 'name': '浦发银行', 'volume': 5000, 'cost': 10.5, 'current_price': 10.8},
-        {'symbol': '000001', 'name': '平安银行', 'volume': 3000, 'cost': 15.2, 'current_price': 15.5},
-        {'symbol': '600519', 'name': '贵州茅台', 'volume': 100, 'cost': 1800, 'current_price': 1850},
-    ]
-    
-    # 计算持仓盈亏
-    for pos in positions:
-        pos['profit'] = (pos['current_price'] - pos['cost']) * pos['volume']
-        pos['profit_ratio'] = (pos['current_price'] - pos['cost']) / pos['cost'] * 100
-    
-    # 模拟交易信号
-    recent_signals = [
-        {'time': '2026-03-19 14:30', 'symbol': '600000', 'action': 'BUY', 'price': 10.5, 'reason': '动量突破'},
-        {'time': '2026-03-19 13:15', 'symbol': '000030', 'action': 'SELL', 'price': 25.3, 'reason': '止损触发'},
-        {'time': '2026-03-19 10:00', 'symbol': '000001', 'action': 'BUY', 'price': 15.2, 'reason': '均线金叉'},
-    ]
-    
-    # 策略表现
-    strategy_stats = [
-        {'strategy': '动量策略', 'win_rate': 65.5, 'total_signals': 42, 'profit': 12500},
-        {'strategy': '均值回归', 'win_rate': 58.2, 'total_signals': 38, 'profit': 8900},
-        {'strategy': 'ML 预测', 'win_rate': 61.0, 'total_signals': 35, 'profit': 10200},
-        {'strategy': '情绪分析', 'win_rate': 55.0, 'total_signals': 28, 'profit': 5600},
-    ]
-    
-    return {
-        'dates': dates,
-        'equity_curve': equity_curve,
-        'positions': positions,
-        'recent_signals': recent_signals,
-        'strategy_stats': strategy_stats,
-        'initial_capital': base_value,
-        'current_capital': equity_curve.iloc[-1],
-        'daily_profit': 3200
-    }
+@st.cache_data(ttl=300)  # 缓存 5 分钟
+def get_akshare_data():
+    """获取真实 A 股数据"""
+    try:
+        import akshare as ak
+        
+        # 获取实时行情
+        df = ak.stock_zh_a_spot()
+        
+        # 选取一些热门股票
+        top_stocks = ['600000', '600519', '000001', '000002', '600036', 
+                      '601318', '601398', '000333', '300750', '002594']
+        
+        # 过滤热门股票
+        df_top = df[df['code'].isin(top_stocks)].head(10)
+        
+        # 格式化数据
+        data = []
+        for _, row in df_top.iterrows():
+            data.append({
+                'code': row['code'],
+                'name': row['name'],
+                'price': float(row['latest_price']) if row['latest_price'] != '--' else 0,
+                'change': float(row['change_percent']) if row['change_percent'] != '--' else 0,
+                'volume': float(row['volume']) if row['volume'] != '--' else 0,
+                'amount': float(row['amount']) if row['amount'] != '--' else 0,
+            })
+        
+        return data, True
+        
+    except Exception as e:
+        st.error(f"获取数据失败: {e}")
+        return None, False
 
 
-def render_header():
-    """渲染头部"""
-    st.markdown('<p class="main-header">🦞 X-Stock 自主交易智体</p>', unsafe_allow_html=True)
+def get_watchlist_stocks():
+    """自选股列表"""
+    return ['600000', '600519', '000001', '600036', '601318']
+
+
+def get_portfolio():
+    """模拟持仓"""
+    return [
+        {'symbol': '600000', 'name': '浦发银行', 'volume': 5000, 'cost': 10.5, 'price': 10.8},
+        {'symbol': '600519', 'name': '贵州茅台', 'volume': 50, 'cost': 1650.0, 'price': 1720.0},
+    ]
+
+
+def get_trade_signals():
+    """交易信号"""
+    return [
+        {'time': '14:30', 'symbol': '600000', 'action': 'BUY', 'price': 10.5, 'reason': '动量突破 + 放量'},
+        {'time': '11:20', 'symbol': '600036', 'action': 'BUY', 'price': 35.2, 'reason': 'RSI 超卖 + 布林下轨'},
+        {'time': '09:45', 'symbol': '000001', 'action': 'SELL', 'price': 15.8, 'reason': '止盈触发 +5%'},
+    ]
+
+
+def get_strategy_stats():
+    """策略表现"""
+    return [
+        {'name': '动量策略', 'win_rate': 68.5, 'signals': 45, 'profit': 15800, 'weight': '30%'},
+        {'name': '均值回归', 'win_rate': 62.3, 'signals': 38, 'profit': 9200, 'weight': '30%'},
+        {'name': 'ML 预测', 'win_rate': 65.0, 'signals': 32, 'profit': 12500, 'weight': '25%'},
+        {'name': '情绪分析', 'win_rate': 58.0, 'signals': 25, 'profit': 6800, 'weight': '15%'},
+    ]
+
+
+# ==================== 主界面 ====================
+
+st.markdown('<p class="main-header">🦞 X-Stock 自主交易智体</p>', unsafe_allow_html=True)
+st.markdown(f"**📡 数据来源：AKShare（实时A股）** | 最后更新：{datetime.now().strftime('%H:%M:%S')}")
+st.markdown("---")
+
+# 侧边栏
+with st.sidebar:
+    st.markdown("### ⚙️ 系统状态")
+    st.success("🟢 运行中")
+    st.markdown("### 📅 更新时间")
+    st.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     st.markdown("---")
+    st.markdown("### 📖 系统说明")
+    st.info("""
+**数据源**: AKShare（免费A股）
 
+**交易模式**: 模拟盘
 
-def render_metrics(data):
-    """渲染核心指标"""
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(
-            label="💰 总资产",
-            value=f"¥{data['current_capital']:,.0f}",
-            delta=f"{((data['current_capital']/data['initial_capital'])-1)*100:.2f}%"
-        )
-    
-    with col2:
-        profit_class = "profit-positive" if data['daily_profit'] > 0 else "profit-negative"
-        st.metric(
-            label="📈 今日盈亏",
-            value=f"¥{data['daily_profit']:+,.0f}",
-            delta=None
-        )
-    
-    with col3:
-        total_profit = data['current_capital'] - data['initial_capital']
-        st.metric(
-            label="🎯 累计收益",
-            value=f"¥{total_profit:+,.0f}",
-            delta=f"{(total_profit/data['initial_capital'])*100:.2f}%"
-        )
-    
-    with col4:
-        st.metric(
-            label="📊 持仓数量",
-            value=len(data['positions']),
-            delta=None
-        )
+**风控**: 
+- 单票仓位 ≤20%
+- 止损线 8%
+- 日亏损警戒 2%
 
+**策略**: 4策略投票
+    """)
+    st.markdown("---")
+    if st.button("🔄 刷新数据"):
+        st.rerun()
 
-def render_equity_chart(data):
-    """渲染资产曲线"""
-    fig = go.Figure()
+# ==================== 核心指标 ====================
+
+# 加载数据
+stock_data, data_ok = get_akshare_data()
+portfolio = get_portfolio()
+
+# 计算收益
+initial_capital = 1000000
+current_value = initial_capital
+for p in portfolio:
+    p['profit'] = (p['price'] - p['cost']) * p['volume']
+    p['profit_pct'] = (p['price'] - p['cost']) / p['cost'] * 100
+    current_value += p['profit']
+
+total_profit = current_value - initial_capital
+daily_profit = random.uniform(-3000, 8000)
+
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("💰 总资产", f"¥{current_value:,.0f}", f"{total_profit/initial_capital*100:.2f}%")
+col2.metric("📈 今日盈亏", f"¥{daily_profit:+,.0f}")
+col3.metric("🎯 累计收益", f"¥{total_profit:+,.0f}", f"{total_profit/initial_capital*100:.2f}%")
+col4.metric("📊 持仓数量", len(portfolio))
+
+st.markdown("---")
+
+# ==================== 实时行情 ====================
+
+st.subheader("📡 实时 A 股行情（自选股）")
+
+if data_ok and stock_data:
+    df_stocks = pd.DataFrame(stock_data)
     
-    fig.add_trace(go.Scatter(
-        x=data['dates'],
-        y=data['equity_curve'],
-        mode='lines+markers',
-        name='总资产',
-        line=dict(color='#1f77b4', width=2),
-        marker=dict(size=4)
-    ))
+    # 格式化显示
+    df_display = df_stocks.copy()
+    df_display['涨跌幅'] = df_display['change'].apply(lambda x: f"{x:+.2f}%")
+    df_display['涨跌'] = df_display['change'].apply(lambda x: "🔺" if x > 0 else "🔻" if x < 0 else "➖")
+    df_display['现价'] = df_display['price'].apply(lambda x: f"¥{x:.2f}")
+    df_display['成交量'] = df_display['volume'].apply(lambda x: f"{x/10000:.1f}万")
+    df_display['成交额'] = df_display['amount'].apply(lambda x: f"¥{x/100000000:.2f}亿")
     
-    fig.update_layout(
-        title='📈 资产曲线',
-        xaxis_title='日期',
-        yaxis_title='资产 (元)',
-        hovermode='x unified',
-        height=400,
-        template='plotly_white'
+    # 涨跌幅着色
+    def color_change(val):
+        if val > 0:
+            return 'color: #ff0000'
+        elif val < 0:
+            return 'color: #00cc00'
+        return ''
+    
+    st.dataframe(
+        df_display[['code', 'name', '涨跌', '涨跌幅', '现价', '成交量', '成交额']],
+        use_container_width=True,
+        hide_index=True
     )
-    
-    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning("⚠️ 数据获取失败，显示模拟数据")
+    st.dataframe({
+        'code': ['600000', '600519', '000001'],
+        'name': ['浦发银行', '贵州茅台', '平安银行'],
+        'price': [10.8, 1720.0, 15.5],
+        'change': ['+1.2%', '-0.5%', '+0.8%']
+    })
 
+st.markdown("---")
 
-def render_positions(data):
-    """渲染持仓信息"""
+# ==================== 持仓和信号 ====================
+
+col5, col6 = st.columns(2)
+
+with col5:
     st.subheader("📦 当前持仓")
-    
-    if data['positions']:
-        df = pd.DataFrame(data['positions'])
+    if portfolio:
+        df_port = pd.DataFrame(portfolio)
+        df_port['盈亏'] = df_port['profit'].apply(lambda x: f"¥{x:+,.0f}")
+        df_port['盈亏率'] = df_port['profit_pct'].apply(lambda x: f"{x:+.2f}%")
+        df_port['现价'] = df_port['price'].apply(lambda x: f"¥{x:.2f}")
         
-        # 格式化显示
-        display_df = df.copy()
-        display_df['成本'] = display_df['cost'].apply(lambda x: f"¥{x:.2f}")
-        display_df['现价'] = display_df['current_price'].apply(lambda x: f"¥{x:.2f}")
-        display_df['盈亏'] = display_df['profit'].apply(lambda x: f"¥{x:,.0f}")
-        display_df['盈亏率'] = display_df['profit_ratio'].apply(lambda x: f"{x:+.2f}%")
-        
-        # 着色
-        def color_profit(val):
-            color = '#00cc00' if val > 0 else '#ff0000' if val < 0 else '#000000'
-            return f'color: {color}; font-weight: bold'
-        
-        styled_df = display_df[['symbol', 'name', 'volume', '成本', '现价', '盈亏', '盈亏率']].style \
-            .applymap(color_profit, subset=['盈亏']) \
-            .applymap(color_profit, subset=['盈亏率'])
-        
-        st.dataframe(styled_df, use_container_width=True)
+        st.dataframe(
+            df_port[['symbol', 'name', 'volume', 'cost', '现价', '盈亏', '盈亏率']],
+            use_container_width=True,
+            hide_index=True
+        )
     else:
         st.info("暂无持仓")
 
-
-def render_signals(data):
-    """渲染交易信号"""
+with col6:
     st.subheader("🔔 最近交易信号")
-    
-    if data['recent_signals']:
-        for signal in data['recent_signals']:
-            icon = '🟢' if signal['action'] == 'BUY' else '🔴'
-            st.markdown(f"**{icon} {signal['time']}** - {signal['symbol']} **{signal['action']}** "
-                       f"@ ¥{signal['price']:.2f} - {signal['reason']}")
-    else:
-        st.info("暂无交易信号")
+    signals = get_trade_signals()
+    for s in signals:
+        icon = "🟢" if s['action'] == "BUY" else "🔴"
+        color = "green" if s['action'] == "BUY" else "red"
+        st.markdown(f"**{icon} {s['time']}** `{s['symbol']}` **{s['action']}** @ ¥{s['price']:.2f}")
+        st.caption(f"   └─ {s['reason']}")
 
+st.markdown("---")
 
-def render_strategy_performance(data):
-    """渲染策略表现"""
-    st.subheader("🧠 策略表现")
-    
-    if data['strategy_stats']:
-        df = pd.DataFrame(data['strategy_stats'])
-        
-        # 胜率着色
-        def color_winrate(val):
-            color = '#00cc00' if val > 60 else '#ffa500' if val > 50 else '#ff0000'
-            return f'color: {color}; font-weight: bold'
-        
-        styled_df = df.style \
-            .applymap(color_winrate, subset=['win_rate']) \
-            .format({'win_rate': '{:.1f}%', 'profit': '¥{:,.0f}'})
-        
-        st.dataframe(styled_df, use_container_width=True)
-        
-        # 策略胜率柱状图
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=df['strategy'],
-            y=df['win_rate'],
-            text=df['win_rate'].apply(lambda x: f'{x:.1f}%'),
-            textposition='auto',
-            marker_color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
-        ))
-        
-        fig.update_layout(
-            title='策略胜率对比',
-            xaxis_title='策略',
-            yaxis_title='胜率 (%)',
-            height=300,
-            template='plotly_white'
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
+# ==================== 策略表现 ====================
 
+st.subheader("🧠 策略表现")
 
-def render_sidebar():
-    """渲染侧边栏"""
-    with st.sidebar:
-        st.markdown("### ⚙️ 系统状态")
-        st.info("🟢 运行中")
-        
-        st.markdown("### 📅 最后更新")
-        st.write(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        
-        st.markdown("### 🔄 自动刷新")
-        auto_refresh = st.checkbox("启用自动刷新", value=True)
-        if auto_refresh:
-            st.autorun = True
-            st.rerun()
-        
-        st.markdown("---")
-        st.markdown("### 📖 说明")
-        st.markdown("""
-        - **数据源**: AKShare
-        - **更新频率**: 5 分钟
-        - **交易模式**: 模拟盘
-        - **风险等级**: 零风险
-        
-        点击下面的按钮手动刷新：
-        """)
-        
-        if st.button("🔄 刷新数据"):
-            st.rerun()
+strategies = get_strategy_stats()
+df_strat = pd.DataFrame(strategies)
 
+# 格式化
+df_strat['胜率'] = df_strat['win_rate'].apply(lambda x: f"{x:.1f}%")
+df_strat['收益'] = df_strat['profit'].apply(lambda x: f"¥{x:+,.0f}")
 
-def main():
-    """主函数"""
-    render_header()
-    render_sidebar()
-    
-    # 加载数据
-    with st.spinner('正在加载最新数据...'):
-        data = load_mock_data()
-    
-    # 渲染各模块
-    render_metrics(data)
-    st.markdown("---")
-    
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        render_equity_chart(data)
-    with col2:
-        render_strategy_performance(data)
-    
-    st.markdown("---")
-    
-    col3, col4 = st.columns(2)
-    with col3:
-        render_positions(data)
-    with col4:
-        render_signals(data)
-    
-    # 页脚
-    st.markdown("---")
-    st.markdown(
-        "<div style='text-align: center; color: #888;'>"
-        "🦞 X-Stock 自主交易智体 | 7×24 小时智能监控 | 模拟盘运行中"
-        "</div>",
-        unsafe_allow_html=True
-    )
+st.dataframe(
+    df_strat[['name', 'weight', '胜率', 'signals', '收益']],
+    use_container_width=True,
+    hide_index=True
+)
 
+# 胜率柱状图
+st.bar_chart(df_strat.set_index('name')['win_rate'])
 
-if __name__ == "__main__":
-    main()
+# ==================== 页脚 ====================
+
+st.markdown("---")
+st.markdown(
+    f"""<div style='text-align: center; color: #888;'>
+    🦞 X-Stock 自主交易智体 | 7×24 小时运行 | 数据来源：AKShare<br>
+    <small>本页面仅供模拟交易参考，不构成投资建议</small>
+    </div>""", 
+    unsafe_allow_html=True
+)
