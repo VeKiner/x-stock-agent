@@ -9,6 +9,22 @@ import pandas as pd
 import numpy as np
 
 
+def calculate_rsi(prices, period=14):
+    """计算 RSI 指标（替代 ta-lib）"""
+    if len(prices) < period + 1:
+        return 50.0
+    
+    delta = pd.Series(prices).diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean().iloc[-1]
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean().iloc[-1]
+    
+    if loss == 0:
+        return 100.0
+    
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+
 class MomentumStrategy(BaseStrategy):
     """动量策略"""
     
